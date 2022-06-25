@@ -8,6 +8,7 @@ import subprocess
 import geopandas
 import pandas
 import shapely
+from tqdm import tqdm
 
 def rgb2gray(rgb):
     if len(rgb.shape) < 3:
@@ -16,6 +17,9 @@ def rgb2gray(rgb):
     gray = 0.2989 * r + 0.5870 * g + 0.1140 * b
 
     return gray
+
+def map2grid(pos, cell_size):
+    return (int(pos[0] / cell_size), int(pos[1] / cell_size))
 
 class DEM():
     def __init__(self, heightmap_path, vmin=0, vmax=1):
@@ -32,19 +36,26 @@ class DEM():
         self.bounds = None
 
         self.scale_vertical(self.vmin, self.vmax)
+        plt.imshow(self.heightmap)
+        plt.savefig("heightmap_grayscale_preview.png")
 
 
     def scale_vertical(self, vmin, vmax):
         """
-
         :param vmin: min height enforced
         :param vmax: max height enforced
-        :return:
+        :return: Nothing, just modifies heightmap attribute
         """
         zmin = np.min(self.heightmap)
         zmax = np.max(self.heightmap)
         self.heightmap = (self.heightmap-zmin)/zmax
         self.heightmap = self.heightmap*(vmax-vmin)+vmin
+
+    # def terrain2map(self, pos, cell_size=0.59):
+    #     return ((pos[1] - 173) * cell_size, (pos[0] - 27) * cell_size)
+    #
+    # def map2terrain(self, pos, cell_size=0.59):
+    #     return (int(round(27 + pos[1] / cell_size)), int(round(173 + pos[0] / cell_size)))
 
     def geocode(self, bounds=None, projstr=None):
 
@@ -71,7 +82,7 @@ class DEM():
                            'count':1, 'dtype':rasterio.float32,
                            'crs':projstr,
                            'transform':affine}
-        print((505,505)*self.profile['transform'])
+        # print((535, 1116)*self.profile['transform'])
         self.tif_path = self.heightmap_path.split(".")[0]+".tif"
         with rasterio.open(self.tif_path, 'w', **self.profile) as dst:
             print("Writing heightmap to "+self.tif_path)
@@ -97,7 +108,7 @@ class DEM():
         subprocess.call([cmd], shell=True)
 
         # Now load the data from the tif.
-        with rasterio.open("viewshed_temp_-2.tif") as ds:
+        with rasterio.open("viewshed_temp.tif") as ds:
             viewshed = ds.read(1)/255.
         #clean up and return the viewshed matrix. It has the same transform
         # as the dem object used, so a matrix is enough
@@ -152,7 +163,7 @@ class RoboGrid():
         # viewshed for.
         if nodes == 'all':
             nodes = list(self.robogrid.keys())
-        for node in nodes:
+        for node in tqdm(nodes):
             rx, ry = self.robogrid[node]['UE_coords']
             viewshed = self.dem.compute_viewshed(rx, ry, observer_height, target_height)
 
