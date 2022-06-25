@@ -228,29 +228,55 @@ class RoboGrid():
         node_shp = geopandas.GeoDataFrame(pandas.DataFrame(key_val), geometry = multi_poly, crs="+init=epsg:4326")
         node_shp.plot(ax=ax, edgecolor='white', facecolor='none')
 
-    def get_directional_nodes(self,node,d):
+    # def get_directional_nodes(self,node,d):
+    def get_directional_nodes(self, node, d):
+        if isinstance(node, int):
+            l = node % self.xn
+            h = (node - l) / self.yn
+            print("Calced: l,h", l,h)
+        else:
+            l, h = node
+            print("Received: l,h", l,h)
 
-        l = node % self.xn
-        h = (node-l)/self.yn
-        if(d == 0):
-            ls = np.array([l-1,l,l-2,l-1,l,l+1,l-3,l-2,l-1,l,l+1,l+2])
-            hs = np.array([h+1,h+1,h+2,h+2,h+2,h+2,h+3,h+3,h+3,h+3,h+3,h+3])
-#            non_zero_idx_t = np.array([i+n1-1,i+n1,i+2*n1,i+2*n1-1,i+2*n1-2,
+        if(d == 1):
+            # North
+            print("1, North")
+            ls = np.array([l-1,l,l+1,l-2,l-1,l,l+1, l+2, l-3,l-2,l-1,l,l+1,l+2, l+3])
+            hs = np.array([h+1,h+1,h+1,h+2,h+2,h+2,h+2, h+2, h+3,h+3,h+3,h+3,h+3,h+3, h+3])
+
+            # ls = np.array([l-1,l,l-2,l-1,l,l+1,l-3,l-2,l-1,l,l+1,l+2])
+            # hs = np.array([h+1,h+1,h+2,h+2,h+2,h+2,h+3,h+3,h+3,h+3,h+3,h+3])
+           # non_zero_idx_t = np.array([i+n1-1,i+n1,i+2*n1,i+2*n1-1,i+2*n1-2,
 #                                     i+2*n1+1,i+3*n1-3,i+3*n1-2,i+3*n1-1,
 #                                     i+3*n1,i+3*n1+1,i+3*n1+2])
-        elif(d == 1):
-            ls = np.array([l+1,l+1,l+2,l+2,l+2,l+2,l+3,l+3,l+3,l+3,l+3,l+3])
-            hs = np.array([h+1,h,h+2,h+1,h,h-1,h+3,h+2,h+1,h,h-1,h-2])
+        elif(d == 0):
+            # EAST
+            print("0, EAST")
+            ls = np.array([l+1,l+1, l+1, l+2,l+2,l+2,l+2,l+2, l+3, l+3,l+3,l+3,l+3,l+3,l+3])
+            hs = np.array([h+1,h, h-1,   h+2,h+1,h,h-1,h-2,   h+3,h+2,h+1,h,h-1,h-2, h-3])
+
+            # ls = np.array([l+1,l+1,l+2,l+2,l+2,l+2,l+3,l+3,l+3,l+3,l+3,l+3])
+            # hs = np.array([h+1,h,h+2,h+1,h,h-1,h+3,h+2,h+1,h,h-1,h-2])
 #            non_zero_idx_t = np.array([i+1,i+n1+1,i+2,i+2-n1,i+2+n1,i+2+2*n1,
 #                                     i+3,i+3-n1,i+3-2*n1,i+3+n1,i+3+2*n1,i+3+3*n1])
-        elif(d == 2):
-            ls = np.array([l,l+1,l-1,l,l+1,l+2,l-2,l-1,l,l+1,l+2,l+3])
-            hs = np.array([h-1,h-1,h-2,h-2,h-2,h-2,h-3,h-3,h-3,h-3,h-3,h-3])
+        elif(d == 3):
+            # SOUTH
+            print("3, South")
+            ls = np.array([l-1,l,l+1,  l-2,l-1,l,l+1,l+2,  l-3,l-2,l-1,l,l+1,l+2,l+3])
+            hs = np.array([h-1,h-1,h-1,h-2,h-2,h-2,h-2,h-2,h-3,h-3,h-3,h-3,h-3,h-3,h-3])
+
+            # ls = np.array([l,l+1,l-1,l,l+1,l+2,l-2,l-1,l,l+1,l+2,l+3])
+            # hs = np.array([h-1,h-1,h-2,h-2,h-2,h-2,h-3,h-3,h-3,h-3,h-3,h-3])
 #            non_zero_idx_t = np.array([i-n1,i-n1+1,i-2*n1,i-2*n1-1,i-2*n1+1,i-2*n1+2,
 #                                     i-3*n1,i-3*n1-1,i-3*n1-2,i-3*n1+1,i-3*n1+2,i-3*n1+3])
-        elif(d == 3):
-            ls = np.array([l-1,l-1,l-2,l-2,l-2,l-2,l-3,l-3,l-3,l-3,l-3,l-3])
-            hs = np.array([h-1,h,h-2,h-1,h,h+1,h-3,h-2,h-1,h,h+1,h+2])
+        elif(d == 2):
+            # WEST
+            print("2, West")
+            ls = np.array([l-1,l-1,l-1,l-2,l-2,l-2,l-2,l-2,l-3,l-3,l-3,l-3,l-3,l-3,l-3])
+            hs = np.array([h-1,h,h+1,h-2,h-1,h,h+1,h+2,h-3,h-2,h-1,h,h+1,h+2,h+3])
+
+            # ls = np.array([l-1,l-1,l-2,l-2,l-2,l-2,l-3,l-3,l-3,l-3,l-3,l-3])
+            # hs = np.array([h-1,h,h-2,h-1,h,h+1,h-3,h-2,h-1,h,h+1,h+2])
 #            non_zero_idx_t = np.array([i-1,i-1-n1,i-2,i-2-n1,i-2-2*n1,i-2+n1,
 #                                     i-3,i-3-n1,i-3-2*n1,i-3-3*n1,i-3+n1,i-3+2*n1])
         else:
@@ -259,15 +285,15 @@ class RoboGrid():
         non_zero_idx = []
         noise_var = []
         count = 0
-        for ii in range(0,12):
+        for ii in range(0,len(ls)):
             if(ls[ii]<self.xn and ls[ii]>=0 and hs[ii]<self.yn and hs[ii]>=0):
                 pos = int(hs[ii]*self.xn+ls[ii])
                 non_zero_idx.append(pos)
                 #noise_var.append(self.noise_vec[ii])
                 count = count+1
-        x = np.zeros((count,self.xn*self.yn))
-        for jj in range(count):
-            x[jj,non_zero_idx[jj]] = 1
+        # x = np.zeros((count,self.xn*self.yn))
+        # for jj in range(count):
+        #     x[jj,non_zero_idx[jj]] = 1
 #        print(i,d)
 #        print(np.array(non_zero_idx))
 
