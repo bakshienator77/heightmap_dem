@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.image as img
+from PIL import Image
 import rasterio
 import pickle
 import os
@@ -9,6 +10,8 @@ import geopandas
 import pandas
 import shapely
 from tqdm import tqdm
+from osgeo import gdal
+import cv2
 
 def rgb2gray(rgb):
     if len(rgb.shape) < 3:
@@ -22,22 +25,28 @@ def map2grid(pos, cell_size):
     return (int(pos[0] / cell_size), int(pos[1] / cell_size))
 
 class DEM():
-    def __init__(self, heightmap_path, vmin=0, vmax=1):
+    def __init__(self, heightmap_path, vmin=0, vmax=1, style="gascola", top_right_augment = 0, scaler=4, pixel2metre=0.5):
+        self.style = style
         self.heightmap_path = heightmap_path # contains the terrain heightmap
         # it is possible that it expects that 1 px = 1 metre
         #self.heightmap = np.flipud(img.imread(heightmap_path))
-        self.heightmap = rgb2gray(img.imread(heightmap_path))
+        self.heightmap = Image.open(heightmap_path).convert("L")
+        shape = np.shape(self.heightmap)
+        self.heightmap = self.heightmap.resize((shape[1]//scaler, shape[0]//scaler))
         self.heightmap -= np.min(self.heightmap)
-
+        self.heightmap = cv2.copyMakeBorder(self.heightmap, top_right_augment, 0, 0, top_right_augment, cv2.BORDER_REPLICATE)
+        self.top_right_augment = top_right_augment
         # these seem to set the height manually 0 and 1 leave unchanged
         self.vmin = vmin # vmin and vmax represent metres
         self.vmax = vmax
 
         self.bounds = None
-
+        self.pixel2metre = pixel2metre*scaler
         self.scale_vertical(self.vmin, self.vmax)
         plt.imshow(self.heightmap)
         plt.savefig("heightmap_grayscale_preview.png")
+
+        self.viewshed = None
 
 
     def scale_vertical(self, vmin, vmax):
@@ -51,11 +60,21 @@ class DEM():
         self.heightmap = (self.heightmap-zmin)/zmax
         self.heightmap = self.heightmap*(vmax-vmin)+vmin
 
-    # def terrain2map(self, pos, cell_size=0.59):
-    #     return ((pos[1] - 173) * cell_size, (pos[0] - 27) * cell_size)
-    #
-    # def map2terrain(self, pos, cell_size=0.59):
-    #     return (int(round(27 + pos[1] / cell_size)), int(round(173 + pos[0] / cell_size)))
+    def terrain2map(pos, cell_size=0.59, style="horizontal"):
+        if style == "horizontal" or style == "gascola":
+            return ((pos[0] - 173) * cell_size, (pos[1] - 27) * cell_size)
+        elif style == "vertical":
+            return ((pos[1] - 173) * cell_size, (1920 - pos[0] - 27) * cell_size)
+        elif style == "ntc":
+            return ((pos[0] - 335) * cell_size, (pos[1] - 41) * cell_size)
+
+    def map2terrain(pos, cell_size=0.59, style="horizontal"):
+        if style == "horizontal" or style == "gascola":
+            return (int(round(173 + pos[0] / cell_size)), int(round(27 + pos[1] / cell_size)))
+        elif style == "vertical":
+            return (int(round(173 + pos[1] / cell_size)), int(round(1920 - 27 - pos[0] / cell_size)))
+        elif style == "ntc":
+            return (int(round(335 + pos[0] / cell_size)), int(round(41 + pos[1] / cell_size)))
 
     def geocode(self, bounds=None, projstr=None):
 
@@ -67,9 +86,25 @@ class DEM():
         if projstr == None:
             projstr = "+proj=utm +zone=8 +ellps=WGS84 +units=m +no_defs"
         # read rasterio documentation to understand these settings
-        width, height = np.shape(self.heightmap)
-        print(width, height)
-        affine = rasterio.transform.from_bounds(bounds[0], bounds[2], bounds[1], bounds[3], width, height)
+        self.height, self.width = np.shape(self.heightmap)
+        print("width: ", self.width, "height: ", self.height)
+        bounds = [bounds[0], bounds[2], bounds[1] + self.top_right_augment*self.pixel2metre, bounds[3] + self.top_right_augment*self.pixel2metre]
+        print(*bounds, "west south east north")
+        # affine = rasterio.transform.from_bounds(bounds[2], bounds[1], bounds[3], bounds[0], width, height)
+        affine = rasterio.transform.from_bounds(*bounds, width=self.width,
+                                                height=self.height)
+
+        print(affine)
+        if self.style == "gascola":
+            print(rasterio.transform.rowcol(affine, 535, 1116), "should be (approx): ", (0, 1080))
+            print(rasterio.transform.rowcol(affine, 0, 1116), "should be (approx): ", (0, 0))
+            print(rasterio.transform.rowcol(affine, 535, 0), "should be (approx): ", (1920, 1080))
+            print(rasterio.transform.rowcol(affine, 0, 0), "should be (approx): ", (1920, 0))
+        elif self.style == "ntc":
+            print(rasterio.transform.rowcol(affine, 535, 1116), "should be (approx): ", (0, 1080))
+            print(rasterio.transform.rowcol(affine, 0, 1116), "should be (approx): ", (0, 0))
+            print(rasterio.transform.rowcol(affine, 535, 0), "should be (approx): ", (1920, 1080))
+            print(rasterio.transform.rowcol(affine, 0, 0), "should be (approx): ", (1920, 0))
 
         #memfile = rasterio.MemoryFile()
         #rst = memfile.open(driver='GTiff', width=width, height=height,
@@ -78,7 +113,7 @@ class DEM():
         #rst.write(self.heightmap.astype(rasterio.float32), 1)
         #rst.close
 
-        self.profile = {'driver':'GTiff', 'width':width, 'height':height,
+        self.profile = {'driver':'GTiff', 'width':self.width, 'height':self.height,
                            'count':1, 'dtype':rasterio.float32,
                            'crs':projstr,
                            'transform':affine}
@@ -88,11 +123,11 @@ class DEM():
             print("Writing heightmap to "+self.tif_path)
             dst.write(self.heightmap.astype(rasterio.float32), 1)
 
-    def compute_viewshed(self, x, y, target_height=None, observer_height=None):
-        # This computes the which locattions in the DEM are viewable from the x and
+    def compute_viewshed(self, x, y, target_height=None, observer_height=None, maximum_distance=200):
+        # This computes the which locations in the DEM are viewable from the x and
         # y location. Optionally, a target height and observer height can be given as well.
-
-        cmd = 'gdal_viewshed -ox '+str(x)+' -oy '+str(y)
+        # https://gdal.org/programs/gdal_viewshed.html
+        cmd = 'gdal_viewshed -ox ' + str(x) + ' -oy '+ str(y)# + ' -md ' + str(maximum_distance)
         if target_height is not None:
             cmd += " -tz "+str(target_height)
         if observer_height is not None:
@@ -104,15 +139,29 @@ class DEM():
         else:
             cmd += " "+self.tif_path + " viewshed_temp.tif"
 
-        print(cmd)
+        # print(cmd)
         subprocess.call([cmd], shell=True)
 
         # Now load the data from the tif.
         with rasterio.open("viewshed_temp.tif") as ds:
             viewshed = ds.read(1)/255.
+
+        # viewshed = gdal.ViewshedGenerate()
         #clean up and return the viewshed matrix. It has the same transform
         # as the dem object used, so a matrix is enough
+        if self.viewshed is None:
+            self.viewshed = viewshed
+        else:
+            self.viewshed += viewshed
+        # print(self.viewshed.shape, np.max(self.viewshed), np.min(self.viewshed))
         # os.remove('viewshed_temp.tif')
+        # plt.imshow(viewshed)
+        # plt.savefig(str(x)+str(y)+".png")
+        # plt.close()
+        path = "./to_gif/" + self.style + "_"+ "/"
+        if not os.path.exists(path):
+            os.makedirs(path)
+        Image.fromarray((viewshed * 255).astype(np.uint8)).save(path + str(x)+"_"+str(y)+".png")
         return viewshed
 
     def height_at_point(self, UE_rx, UE_ry):
@@ -144,19 +193,37 @@ class RoboGrid():
         # and then gets the IM_coordinates afterwards. This is to ensure that
         # the robogrid nodes are spaced in even UE increments.
 
-        node = 0
-        for y_idx in np.arange(self.dem.bounds[3]-5, self.dem.bounds[2]+5, -self.yinc):
-            for x_idx in np.arange(self.dem.bounds[0]+5, self.dem.bounds[1]-self.xinc, self.xinc):
-                UE_rx = x_idx + self.xinc/2 #(x_idx*self.xinc+self.xinc/2.) #- (width-self.xinc*self.xn)
-                UE_ry = y_idx - self.yinc/2 #(y_idx*self.yinc+self.yinc/2.) #- (height-self.yinc*self.yn)/2.
+        # node = 0
+        ht_coord = 0
+        wt_coord = 0
+        # for y_idx in np.arange(self.dem.bounds[2]+5, self.dem.bounds[3]-self.yinc, self.yinc):
+        # print(np.arange(0, self.dem.bounds[3]- self.yinc, self.yinc))
+        # print(self.yinc//2, self.dem.bounds[3], self.yinc)
+        for y_idx in np.arange(self.yinc//2, self.dem.bounds[3] + self.dem.pixel2metre*self.dem.top_right_augment, self.yinc):#, self.yinc):
+            # going from -15.93 to 1116.87 in 37 steps
+            wt_coord=0
+            # for x_idx in np.arange(self.dem.bounds[0]+5, self.dem.bounds[1]-self.xinc, self.xinc):
+            for x_idx in np.arange(self.xinc//2, self.dem.bounds[1] + self.dem.pixel2metre*self.dem.top_right_augment, self.xinc):#, self.xinc):
+                # GOING FROM  -102.07 to 535.13
+                UE_rx = x_idx #(x_idx*self.xinc+self.xinc/2.) #- (width-self.xinc*self.xn)
+                UE_ry = y_idx #(y_idx*self.yinc+self.yinc/2.) #- (height-self.yinc*self.yn)/2.
 
                 # rx and ry are now in image coordinatesr. Need to put them in UE coordinates
                 IM_rx, IM_ry = rasterio.transform.rowcol(self.dem.profile['transform'], UE_rx, UE_ry)
                 print("WORLD: ", UE_rx, UE_ry, "IMAGE: ", IM_rx, IM_ry)
                 # IM_rx, IM_ry = rasterio.transform.i, j = (self.dem.profile['transform'], UE_rx, UE_ry)
                 z = self.dem.heightmap[IM_rx, IM_ry]
+                # node = (wt_coord, ht_coord)
+                node = map2grid((UE_rx, UE_ry), self.yinc)
+                # print("OG: ", node)
+                # print("Function: ", map2grid((UE_rx, UE_ry), self.yinc))
                 self.robogrid[node] = {'IM_coords':(IM_rx, IM_ry), 'UE_coords':(UE_rx, UE_ry), 'z':z}
-                node += 1
+                wt_coord+=1
+            ht_coord+=1
+
+        self.xn = wt_coord
+        self.yn = ht_coord
+        print("xn, wt: ", self.xn, "yn, ht: ", self.yn)
 
     def compute_node_viewshed(self, observer_height=None, target_height=None, nodes='all'):
         # Nodes can either be all or a list of the individual nodes to compute the
@@ -169,7 +236,7 @@ class RoboGrid():
 
             # I need to make a raster in memory of the viewshed matrix.
             memfile = rasterio.MemoryFile()
-            width, height = np.shape(self.dem.heightmap)
+            height, width = np.shape(self.dem.heightmap)
             affine = self.dem.profile['transform']
             rst = memfile.open(driver='GTiff', width=width, height=height,
                                count=1, dtype=rasterio.float32,
@@ -188,17 +255,21 @@ class RoboGrid():
                     x1, x2 = np.min(edges[:,0]), np.max(edges[:,0])
                     y1, y2 = np.min(edges[:,1]), np.max(edges[:,1])
                     window_bounds = [x1,y1,x2,y2]
-
+                    # print("Window bouns: ", window_bounds)
                     # Now get the average of the visibility inside the node bounds
-                    window = rst.window(*window_bounds)
+                    window =  rst.window(*window_bounds)
                     view_node = rst.read(1, window=window)
                     self.robogrid[node]['viewshed'][direction][dir_node] = np.average(view_node)
                     print(dir_node, np.average(view_node))
 
-
             rst.close()
+            if self.dem.viewshed is not None:
+                del viewshed
 
     def __get_node_edges__(self, node):
+        # print("node: ", node)
+        node = (node % self.xn, int(node/self.xn))
+        # print("node_tuple: ", node)
         rx, ry = self.robogrid[node]["UE_coords"]
         edges = []
         edges.append([rx-self.xinc/2, ry+self.yinc/2])
@@ -233,14 +304,14 @@ class RoboGrid():
         if isinstance(node, int):
             l = node % self.xn
             h = (node - l) / self.yn
-            print("Calced: l,h", l,h)
+            # print("Calced: l,h", l,h)
         else:
             l, h = node
-            print("Received: l,h", l,h)
+            # print("Received: l,h", l,h)
 
         if(d == 1):
             # North
-            print("1, North")
+            # print("1, North")
             ls = np.array([l-1,l,l+1,l-2,l-1,l,l+1, l+2, l-3,l-2,l-1,l,l+1,l+2, l+3])
             hs = np.array([h+1,h+1,h+1,h+2,h+2,h+2,h+2, h+2, h+3,h+3,h+3,h+3,h+3,h+3, h+3])
 
@@ -251,7 +322,7 @@ class RoboGrid():
 #                                     i+3*n1,i+3*n1+1,i+3*n1+2])
         elif(d == 0):
             # EAST
-            print("0, EAST")
+            # print("0, EAST")
             ls = np.array([l+1,l+1, l+1, l+2,l+2,l+2,l+2,l+2, l+3, l+3,l+3,l+3,l+3,l+3,l+3])
             hs = np.array([h+1,h, h-1,   h+2,h+1,h,h-1,h-2,   h+3,h+2,h+1,h,h-1,h-2, h-3])
 
@@ -261,7 +332,7 @@ class RoboGrid():
 #                                     i+3,i+3-n1,i+3-2*n1,i+3+n1,i+3+2*n1,i+3+3*n1])
         elif(d == 3):
             # SOUTH
-            print("3, South")
+            # print("3, South")
             ls = np.array([l-1,l,l+1,  l-2,l-1,l,l+1,l+2,  l-3,l-2,l-1,l,l+1,l+2,l+3])
             hs = np.array([h-1,h-1,h-1,h-2,h-2,h-2,h-2,h-2,h-3,h-3,h-3,h-3,h-3,h-3,h-3])
 
@@ -271,7 +342,7 @@ class RoboGrid():
 #                                     i-3*n1,i-3*n1-1,i-3*n1-2,i-3*n1+1,i-3*n1+2,i-3*n1+3])
         elif(d == 2):
             # WEST
-            print("2, West")
+            # print("2, West")
             ls = np.array([l-1,l-1,l-1,l-2,l-2,l-2,l-2,l-2,l-3,l-3,l-3,l-3,l-3,l-3,l-3])
             hs = np.array([h-1,h,h+1,h-2,h-1,h,h+1,h+2,h-3,h-2,h-1,h,h+1,h+2,h+3])
 
